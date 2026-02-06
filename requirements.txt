@@ -1,0 +1,8 @@
+django
+django-admin
+djangorestframework
+djangorestframework-simplejwt
+celery
+redis
+flower
+psycopg2-binary
