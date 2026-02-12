@@ -2,26 +2,37 @@ from rest_framework import serializers
 from apps.orders.models import Order, OrderItem
 
 class OrderItemSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source="menu_item.name", read_only=True)
+    price = serializers.DecimalField(
+        source="menu_item.price",
+        max_digits=8,
+        decimal_places=2,
+        read_only=True
+    )
+
     class Meta:
         model = OrderItem
-        fields = [
+        fields = (
+            "id",
             "menu_item",
-            "restaurant",
+            "name",
             "price",
-            "quantity"
-        ]
+            "quantity",
+        )
+
 
 
 class OrderSerializer(serializers.ModelSerializer):
+    restaurant = serializers.CharField(source="restaurant.name", read_only=True)
     items = OrderItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = Order
-        fields = [
+        fields = (
             "id",
-            "status",
+            "restaurant",
             "total_amount",
-            "razorpay_payment_id",
-            "created_at",
-            "items"
-        ]
+            "status",
+            "items",
+            "created_at"
+        )
