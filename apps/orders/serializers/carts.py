@@ -3,9 +3,9 @@ from apps.orders.models import Cart, CartItem
 
 
 class CartItemSerializer(serializers.ModelSerializer):
-    name = serializers.CharField(source='menu_items.name', read_only=True)
+    name = serializers.CharField(source='menu_item.name', read_only=True)
     price = serializers.DecimalField(
-        source='menu_items.price',
+        source='menu_item.price',
         max_digits=8,
         decimal_places=2,
         read_only=True
@@ -26,9 +26,10 @@ class CartSerializer(serializers.ModelSerializer):
 
     def get_subtotal(self, obj):
         return sum(
-            item.menu_items.price * item.quantity
+            item.menu_item.price * item.quantity
             for item in obj.items.all()
         )
+
     
 #list cart
 class CartItemListSerializer(serializers.ModelSerializer):
@@ -54,4 +55,4 @@ class CartListSerializer(serializers.ModelSerializer):
         fields = ('id', 'restaurant', 'items', 'subtotal')
 
     def get_subtotal(self, obj):
-        return sum(item.menu_items.price * item.quantity for item in obj.items.all())
+        return sum(item.menu_item.price * item.quantity for item in obj.items.all())

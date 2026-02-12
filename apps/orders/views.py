@@ -1,6 +1,6 @@
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework import status, viewsets, mixins
+from rest_framework import status, viewsets, mixins, generics
 from django.db import transaction
 from django.core.cache import cache
 from rest_framework.generics import ListAPIView
@@ -21,21 +21,9 @@ class CartViewSet(viewsets.ViewSet):
     def create(self, request):
         items = request.data.get("items")
 
-        if not items or not isinstance(items, list):
-            return Response(
-                {"detail": "items list required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
         for entry in items:
-            menu_id = entry.get("menu_id")
-            action = entry.get("action")
-
-            if not menu_id or action not in ("increase", "decrease"):
-                return Response(
-                    {"detail": "menu_id and valid action required"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            menu_id = entry["menu_id"]
+            action = entry["action"]
 
             menu = Menu.objects.select_related("restaurant").filter(
                 id=menu_id,
@@ -43,19 +31,17 @@ class CartViewSet(viewsets.ViewSet):
             ).first()
 
             if not menu:
-                return Response(
-                    {"detail": f"Invalid or unavailable menu_id {menu_id}"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                return Response({"detail": "Invalid menu"}, status=400)
 
             cart, _ = Cart.objects.get_or_create(
                 user=request.user,
-                restaurant=menu.restaurant
+                restaurant=menu.restaurant,
+                status=Cart.Status.ACTIVE
             )
 
             cart_item = CartItem.objects.filter(
                 cart=cart,
-                menu_items=menu
+                menu_item=menu
             ).first()
 
             if action == "increase":
@@ -65,31 +51,28 @@ class CartViewSet(viewsets.ViewSet):
                 else:
                     CartItem.objects.create(
                         cart=cart,
-                        menu_items=menu,
+                        menu_item=menu,
+                        menu_name_snapshot=menu.name,
+                        price_snapshot=menu.price,
                         quantity=1
                     )
 
             elif action == "decrease":
                 if not cart_item:
-                    return Response(
-                        {"detail": "Cannot decrease item not in cart"},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
+                    continue
                 if cart_item.quantity <= 1:
-                    cart_item.delete()  # remove item entirely
+                    cart_item.delete()
                 else:
                     cart_item.quantity -= 1
                     cart_item.save()
 
         carts = Cart.objects.filter(
-            user=request.user
-        ).prefetch_related("items__menu_items", "restaurant")
+            user=request.user,
+            status=Cart.Status.ACTIVE
+        ).prefetch_related("items")
 
-        return Response(
-            CartSerializer(carts, many=True).data,
-            status=status.HTTP_200_OK
-        )
+        return Response(CartSerializer(carts, many=True).data)
+
     
 #delete cart
 class CartManageViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):
@@ -106,26 +89,28 @@ class CartListViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     serializer_class = CartListSerializer
 
     def list(self, request, *args, **kwargs):
-        cache_key = cart_list_cache_key(request.user.id)
+        # cache_key = cart_list_cache_key(request.user.id)
 
-        cached_data = cache.get(cache_key)
-        if cached_data:
-            return Response(cached_data)
+        # cached_data = cache.get(cache_key)
+        # if cached_data:
+        #     return Response(cached_data)
 
         queryset = Cart.objects.filter(
-            user=request.user
+            user=request.user,
+            status=Cart.Status.ACTIVE 
         ).prefetch_related(
-            "items__menu_items",
+            "items__menu_item",
             "restaurant"
         )
 
         data = self.get_serializer(queryset, many=True).data
-        cache.set(cache_key, data, timeout=300)  # 5 min
+        # cache.set(cache_key, data, timeout=300)
 
         return Response(data)
+
     
 #list all orders
-class OrderListView(ListAPIView):
+class OrderListView(generics.ListAPIView):
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
 
@@ -133,6 +118,7 @@ class OrderListView(ListAPIView):
         return (
             Order.objects
             .filter(user=self.request.user)
-            .prefetch_related("items__menu_item", "items__restaurant")
+            .select_related("restaurant", "payment")   # FK → select_related
+            .prefetch_related("items__menu_item")      # Reverse FK → prefetch
             .order_by("-created_at")
         )

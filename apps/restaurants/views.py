@@ -48,7 +48,6 @@ class MenuViewSet(ModelViewSet):
         user = self.request.user
         print('debug user : ', user.id, user.role, user.username)
 
-        # Only restaurant admins can see their menus
         if user.role != user.Role.RESTAURANT_ADMIN:
             return Menu.objects.none()
 

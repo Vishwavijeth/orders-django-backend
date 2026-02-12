@@ -1,45 +1,56 @@
 from celery import shared_task
 from django.db import transaction
-from apps.orders.models import Order, OrderItem, CartItem
+from django.core.cache import cache
+from apps.orders.models import Order, OrderItem, Cart
 from apps.payments.models import Payment
 from apps.users.utils import send_email
+from apps.orders.cache_keys import cart_list_cache_key
+
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 5})
 def create_orders_from_payment(self, payment_id):
-    payment = Payment.objects.select_related().prefetch_related(
-        "carts__items__menu_items"
-    ).get(id=payment_id)
+    payment = Payment.objects.get(id=payment_id)
 
     with transaction.atomic():
-        for cart in payment.carts.all():
+        carts_qs = (
+            payment.carts
+            .select_for_update()
+            .filter(status=Cart.Status.ACTIVE)
+            .prefetch_related("items", "items__menu_item")
+        )
+
+        # affected_user_ids = set()
+
+        for cart in carts_qs:
+            total = sum(item.price_snapshot * item.quantity for item in cart.items.all())
+
             order = Order.objects.create(
                 user=cart.user,
+                restaurant=cart.restaurant,
                 payment=payment,
-                status=Order.Status.PAID,
-                total_amount=sum(
-                    item.menu_items.price * item.quantity
-                    for item in cart.items.all()
-                ),
-                razorpay_payment_id=payment.razorpay_payment_id
+                total_amount=total
             )
 
             OrderItem.objects.bulk_create([
                 OrderItem(
                     order=order,
-                    menu_item=item.menu_items,
-                    restaurant=item.menu_items.restaurant,
-                    price=item.menu_items.price,
+                    menu_item=item.menu_item,
+                    menu_name_snapshot=item.menu_name_snapshot,
+                    price_snapshot=item.price_snapshot,
                     quantity=item.quantity
                 )
                 for item in cart.items.all()
             ])
 
-            cart.delete()
+            cart.status = Cart.Status.CHECKED_OUT
+            cart.save(update_fields=["status"])
 
-        payment.carts.clear()
+            #affected_user_ids.add(cart.user_id)
+    
+    send_order_confirmation_email(payment_id)
 
-    # Send mail AFTER everything is saved
-    send_order_confirmation_email.delay(payment.id)
+    # for user_id in affected_user_ids:
+    #     cache.delete(cart_list_cache_key(user_id))
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 5})

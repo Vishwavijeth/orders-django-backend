@@ -22,52 +22,45 @@ class CreatePaymentLinkView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        serializer = CreatePaymentSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        cart_ids = request.data.get("cart_ids", [])
 
         carts = Cart.objects.filter(
-            id__in=serializer.validated_data["cart_ids"],
-            user=request.user
-        ).prefetch_related("items__menu_items")
+            id__in=cart_ids,
+            user=request.user,
+            status=Cart.Status.ACTIVE
+        ).prefetch_related("items")
 
         if not carts.exists():
-            return Response({"detail": "No valid carts found"}, status=400)
+            return Response({"detail": "No valid carts selected"}, status=400)
 
-        # Calculate total amount
-        total = 0
-        for cart in carts:
-            for item in cart.items.all():
-                total += item.menu_items.price * item.quantity
-
-        client = razorpay.Client(
-            auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+        total_amount = sum(
+            item.price_snapshot * item.quantity
+            for cart in carts
+            for item in cart.items.all()
         )
 
-        # Create Razorpay payment link
+        client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+
         link = client.payment_link.create({
-            "amount": int(total * 100),
+            "amount": int(total_amount * 100),  # amount in paise
             "currency": "INR",
             "description": "Food Order Payment",
-            "customer": {
-                "name": request.user.username,
-                "email": request.user.email
-            }
+            "customer": {"email": request.user.email},
         })
 
-        # Save Payment
         payment = Payment.objects.create(
-            provider="razorpay",
-            razorpay_payment_link_id=link["id"],
-            payment_link=link["short_url"],
-            amount=total
+            amount=total_amount,
+            payment_id=link["id"],
+            payment_link=link["short_url"]
         )
-        payment.carts.set(carts)
+        payment.carts.set(carts)  # attach all selected carts
 
         return Response({
             "payment_id": payment.id,
-            "payment_link": link["short_url"],
-            "amount": total
+            "payment_link": payment.payment_link,
+            "amount": float(payment.amount)
         })
+
     
 class PaymentStatusView(APIView):
     permission_classes = [IsAuthenticated]
@@ -92,70 +85,24 @@ class PaymentStatusView(APIView):
 @csrf_exempt
 def razorpay_webhook(request):
     payload = request.body
-    received_signature = request.headers.get("X-Razorpay-Signature")
+    signature = request.headers.get("X-Razorpay-Signature")
+    expected = hmac.new(settings.RAZORPAY_WEBHOOK_SECRET.encode(), payload, hashlib.sha256).hexdigest()
 
-    print("=== Razorpay Webhook Received ===")
-    print("Payload:", payload.decode())
-    print("Signature:", received_signature)
-
-    secret = settings.RAZORPAY_WEBHOOK_SECRET.encode()
-
-    expected_signature = hmac.new(
-        secret,
-        payload,
-        hashlib.sha256
-    ).hexdigest()
-
-    if not received_signature or not hmac.compare_digest(
-        received_signature, expected_signature
-    ):
-        print("Signature verification FAILED")
+    if not hmac.compare_digest(signature or "", expected):
         return HttpResponse(status=400)
 
-    print("Signature verification PASSED")
+    data = json.loads(payload)
+    if data.get("event") != "payment_link.paid":
+        return HttpResponse(status=200)
 
-    try:
-        data = json.loads(payload)
-    except json.JSONDecodeError:
-        print("Invalid JSON")
-        return HttpResponse(status=400)
+    link_id = data["payload"]["payment_link"]["entity"]["id"]
 
-    event = data.get("event")
-    print("Event:", event)
-
-    if event == "payment_link.paid":
-        link_entity = data["payload"]["payment_link"]["entity"]
-        link_id = link_entity["id"]
-
-        # safer extraction
-        razorpay_payment_id = (
-            data.get("payload", {})
-                .get("payment", {})
-                .get("entity", {})
-                .get("id")
-        )
-
-        try:
-            payment = Payment.objects.prefetch_related(
-                "carts__items__menu_items"
-            ).get(razorpay_payment_link_id=link_id)
-        except Payment.DoesNotExist:
-            return HttpResponse(status=404)
-
-        if payment.status == Payment.Status.SUCCESS:
-            return HttpResponse(status=200)
-
-        with transaction.atomic():
+    with transaction.atomic():
+        payment = Payment.objects.select_for_update().get(payment_id=link_id)
+        if payment.status != Payment.Status.SUCCESS:
             payment.status = Payment.Status.SUCCESS
-            payment.razorpay_payment_id = razorpay_payment_id
-            payment.save()
+            payment.save(update_fields=["status"])
 
-        create_orders_from_payment.delay(payment.id)
-
-        print("Payment SUCCESS → Orders created → Cart cleared")
-
-    else:
-        print("Event ignored:", event)
-
-    print("=== Webhook Processing Complete ===\n")
+    # Trigger async task to create orders and mark carts as paid
+    create_orders_from_payment.delay(payment.id)
     return HttpResponse(status=200)

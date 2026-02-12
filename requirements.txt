@@ -2,6 +2,7 @@ django
 django-admin
 djangorestframework
 djangorestframework-simplejwt
+django-phonenumber-field
 celery
 redis
 flower
