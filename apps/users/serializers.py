@@ -1,7 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .utils import generate_verification_link
-from .utils import send_email
 from .tasks import send_user_verify_mail
 
 User = get_user_model()

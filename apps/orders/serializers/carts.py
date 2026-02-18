@@ -1,4 +1,4 @@
-from rest_framework import serializers, mixins, viewsets
+from rest_framework import serializers
 from apps.orders.models import Cart, CartItem
 
 
