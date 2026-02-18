@@ -4,8 +4,7 @@ from django.core.cache import cache
 from apps.orders.models import Order, OrderItem, Cart
 from apps.payments.models import Payment
 from apps.users.utils import send_email
-from apps.orders.cache_keys import cart_list_cache_key
-
+from .utils import annotate_cart_totals, get_payment_orders_total
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 5})
 def create_orders_from_payment(self, payment_id):
@@ -19,10 +18,11 @@ def create_orders_from_payment(self, payment_id):
             .prefetch_related("items", "items__menu_item")
         )
 
-        # affected_user_ids = set()
-
         for cart in carts_qs:
-            total = sum(item.price_snapshot * item.quantity for item in cart.items.all())
+            total = sum(
+                item.price_snapshot * item.quantity
+                for item in cart.items.all()
+            )
 
             order = Order.objects.create(
                 user=cart.user,
@@ -45,12 +45,8 @@ def create_orders_from_payment(self, payment_id):
             cart.status = Cart.Status.CHECKED_OUT
             cart.save(update_fields=["status"])
 
-            #affected_user_ids.add(cart.user_id)
-    
-    send_order_confirmation_email(payment_id)
+    send_order_confirmation_email.delay(payment_id)
 
-    # for user_id in affected_user_ids:
-    #     cache.delete(cart_list_cache_key(user_id))
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 5})
@@ -58,14 +54,16 @@ def send_order_confirmation_email(self, payment_id):
     orders = (
         Order.objects
         .filter(payment_id=payment_id)
-        .select_related("user")
+        .select_related("user", "payment")
         .prefetch_related("items__menu_item")
     )
 
     if not orders.exists():
         return
 
-    user = orders.first().user
+    first_order = orders.first()
+    user = first_order.user
+    payment_obj = first_order.payment
 
     items = []
     total_amount = 0
@@ -74,22 +72,22 @@ def send_order_confirmation_email(self, payment_id):
         total_amount += order.total_amount
         for item in order.items.all():
             items.append(
-                f"- {item.menu_item.name} x {item.quantity} (₹{item.price})"
+                f"- {item.menu_item.name} x {item.quantity} (₹{item.price_snapshot})"
             )
 
     message = f"""
-                    Hi {user.username},
+Hi {user.username},
 
-                    🎉 Your order has been placed successfully!
+🎉 Your order has been placed successfully!
 
-                    Payment ID: {orders.first().razorpay_payment_id}
-                    Total Amount: ₹{total_amount}
+Payment ID: {payment_obj.payment_id}
+Total Amount: ₹{total_amount}
 
-                    Items Ordered:
-                    {chr(10).join(items)}
+Items Ordered:
+{chr(10).join(items)}
 
-                    Thank you for ordering with us!
-                """
+Thank you for ordering with us!
+"""
 
     send_email(
         subject="Your order has been placed",
