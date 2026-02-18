@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import generics, permissions, status
 from django.http import HttpResponse
-from .utils import RegisterSerializer, UsersListSerializer, DeleteUserSerializer
+from .serializers import RegisterSerializer, UsersListSerializer, DeleteUserSerializer
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_decode
 from rest_framework.permissions import IsAuthenticated
