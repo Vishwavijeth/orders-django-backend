@@ -134,14 +134,14 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = "orders_backend.urls"
 
-RAZORPAY_KEY_ID = 'rzp_test_SBfiwR6fAtxQVg'
-RAZORPAY_KEY_SECRET = 'PO2Qi55YHhNp0Ww2TSf6LZd6'
-RAZORPAY_WEBHOOK_SECRET = 'razorpay-webhook-secret'
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET")
 
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://127.0.0.1:6380/1",
+        "LOCATION": "redis://127.0.0.1:6380/0",
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         },

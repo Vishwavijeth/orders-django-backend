@@ -7,10 +7,10 @@ from django.db import transaction
 import razorpay
 
 from apps.payments.models import Payment
-from .seriallizers import  CreatePaymentSerializer
 
 from apps.orders.models import Cart, Order
 from .tasks import create_orders_from_payment
+from .utils import get_carts_total
 
 import json
 import hmac
@@ -33,11 +33,13 @@ class CreatePaymentLinkView(APIView):
         if not carts.exists():
             return Response({"detail": "No valid carts selected"}, status=400)
 
-        total_amount = sum(
-            item.price_snapshot * item.quantity
-            for cart in carts
-            for item in cart.items.all()
-        )
+        # total_amount = sum(
+        #     item.price_snapshot * item.quantity
+        #     for cart in carts
+        #     for item in cart.items.all()
+        # )
+
+        total_amount = get_carts_total(carts)
 
         client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
 
