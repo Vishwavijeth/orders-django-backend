@@ -6,84 +6,70 @@ from rest_framework.viewsets import ModelViewSet
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.exceptions import PermissionDenied
 from apps.restaurants.models import Restaurant, Menu
-from .serializers import RestaurantSerializer, ListRestaurantSerializer, MenuCreateSerializer, ListAllMenuSerializer
-
-class IsRestaurantOwnerOrReadOnly(permissions.BasePermission):
-
-    def has_object_permission(self, request, view, obj):
-        if request.method in permissions.SAFE_METHODS:
-            return True
-        return obj.owner == request.user
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from .permissions import IsRestaurantAdmin, IsRestaurantOwnerOrReadOnly, IsMenuOwnerOrReadOnly
+from .serializers import RestaurantSerializer, MenuSerializer
+from .pagination import MenuPagination
     
 class RestaurantViewSet(viewsets.ModelViewSet):
 
+    # public can view, only owner can modify
+
+    queryset = (
+        Restaurant.objects.select_related("owner").order_by("-created_at")
+    )
     serializer_class = RestaurantSerializer
-    permission_classes = [permissions.IsAuthenticated, IsRestaurantOwnerOrReadOnly]
-    queryset = Restaurant.objects.all().select_related('owner').order_by('id')
+    permission_classes = [IsRestaurantOwnerOrReadOnly, IsAuthenticatedOrReadOnly]
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
-
-class ListRestaurantsView(generics.ListAPIView):
-    queryset = (
-        Restaurant.objects
-        .select_related("owner")
-        .order_by("-created_at")
-    )
-    serializer_class = ListRestaurantSerializer
-    permission_classes = [permissions.AllowAny]
-
-class IsRestaurantAdmin(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return (
-            request.user.is_authenticated
-            and request.user.role == 'RESTAURANT_ADMIN'
-        )
+        return serializer.save(owner=self.request.user)
 
 class MenuViewSet(ModelViewSet):
-    serializer_class = MenuCreateSerializer
-    permission_classes = [IsAuthenticated]
+    """
+    GET → public
+    WRITE → restaurant admin only
+    """
 
+    serializer_class = MenuSerializer
+    pagination_class = MenuPagination
+
+    # dynamic permissions
+    def get_permissions(self):
+        if self.request.method in ["GET", "HEAD", "OPTIONS"]:
+            return [permissions.AllowAny()]
+        return [IsRestaurantAdmin(), IsMenuOwnerOrReadOnly()]
+
+    # optimized queryset
     def get_queryset(self):
         user = self.request.user
-        print('debug user : ', user.id, user.role, user.username)
 
-        if user.role != user.Role.RESTAURANT_ADMIN:
-            return Menu.objects.none()
-
-        return (
+        base_qs = (
             Menu.objects
-            .select_related('restaurant')
-            .filter(restaurant__owner=user)
-            .order_by('id')
+            .select_related("restaurant", "restaurant__owner")
+            .order_by("restaurant__name", "name")
         )
 
+        # 🔹 public listing
+        if self.request.method in ["GET", "HEAD", "OPTIONS"]:
+            return base_qs.filter(is_available=True)
+
+        # 🔹 admin view (only own restaurants)
+        if user.is_authenticated and user.role == user.Role.RESTAURANT_ADMIN:
+            return base_qs.filter(restaurant__owner=user)
+
+        return Menu.objects.none()
+
+    # safe create
     def perform_create(self, serializer):
         user = self.request.user
-        
-        print('request data : ', self.request.data)
-        if user.role != user.Role.RESTAURANT_ADMIN:
-            raise PermissionDenied("Only restaurant admins can add menu items.")
+        restaurant_id = self.request.data.get("restaurant")
 
-        restaurant_id = self.request.data.get('restaurant')
+        restaurant = Restaurant.objects.filter(
+            id=restaurant_id,
+            owner=user,
+        ).first()
 
-        try:
-            restaurant = Restaurant.objects.get(
-                id=restaurant_id,
-                owner=user
-            )
-        except Restaurant.DoesNotExist:
+        if not restaurant:
             raise PermissionDenied("You do not own this restaurant.")
 
         serializer.save(restaurant=restaurant)
-
-class MenuPagination(PageNumberPagination):
-    page_size = 10
-    page_size_query_param = 'page_size'
-    max_page_size = 50
-
-class ListAllAvailableMenuView(generics.ListAPIView):
-    serializer_class = ListAllMenuSerializer
-    permission_classes = [permissions.AllowAny]
-    queryset = Menu.objects.filter(is_available=True).select_related('restaurant').order_by('id','restaurant__name', 'name')
-    pagination_class = MenuPagination
