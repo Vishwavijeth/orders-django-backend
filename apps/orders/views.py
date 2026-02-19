@@ -3,39 +3,74 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework import viewsets, mixins, generics
 from rest_framework.views import APIView
 from django.db import transaction
+from django.db.models.functions import Coalesce
+from django.db.models import Sum, F, DecimalField, ExpressionWrapper, Value
 from django.conf import settings
 from apps.orders.models import Cart, CartItem
 from apps.restaurants.models import Menu
-from apps.orders.serializers.carts import CartSerializer, CartListSerializer
+from apps.orders.serializers.carts import CartSerializer
 
 from apps.orders.models import Order
 from apps.orders.serializers.order import OrderSerializer
 from .tasks import generate_order_report_task
 
 
-#create cart
-class CartViewSet(viewsets.ViewSet):
+# Cart view set
+
+class CartViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet
+):
     permission_classes = [IsAuthenticated]
+    serializer_class = CartSerializer
+    queryset = Cart.objects.all()
 
+    def get_queryset(self):
+        line_total = ExpressionWrapper(
+            F("items__menu_item__price") * F("items__quantity"),
+            output_field=DecimalField(max_digits=10, decimal_places=2),
+        )
+
+        return (
+            Cart.objects.filter(
+                user=self.request.user,
+                status=Cart.Status.ACTIVE,
+            )
+            .prefetch_related("items__menu_item", "restaurant")
+            .annotate(
+                subtotal=Coalesce(
+                    Sum(line_total),
+                    Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)),
+                )
+            )
+        )
+    
     @transaction.atomic
-    def create(self, request):
-        items = request.data.get("items")
+    def create(self, request, *args, **kwargs):
 
+        items = request.data.get("items", [])
+
+        if not items:
+            return Response({"detail" : "items required"}, status=400)
+        
         for entry in items:
-            menu_id = entry["menu_id"]
-            action = entry["action"]
+            menu_id = entry.get("menu_id")
+            action = entry.get("action")
 
-            menu = Menu.objects.select_related("restaurant").filter(
-                id=menu_id,
-                is_available=True
-            ).first()
+            menu = (
+                Menu.objects.select_related("restaurant")
+                .filter(id=menu_id, is_available=True)
+                .first()
+            )
 
             if not menu:
-                return Response({"detail": "Invalid menu"}, status=400)
-
+                return Response({"detail" : "invalid menu"}, status=400)
+            
             cart, _ = Cart.objects.get_or_create(
                 user=request.user,
-                restaurant=menu.restaurant,
+                restaurant = menu.restaurant,
                 status=Cart.Status.ACTIVE
             )
 
@@ -44,70 +79,33 @@ class CartViewSet(viewsets.ViewSet):
                 menu_item=menu
             ).first()
 
+            # INCREASE
             if action == "increase":
                 if cart_item:
                     cart_item.quantity += 1
-                    cart_item.save()
+                    cart_item.save(update_fields=["quantity"])
                 else:
                     CartItem.objects.create(
                         cart=cart,
                         menu_item=menu,
                         menu_name_snapshot=menu.name,
                         price_snapshot=menu.price,
-                        quantity=1
+                        quantity=1,
                     )
 
+            # DECREASE
             elif action == "decrease":
                 if not cart_item:
                     continue
+
                 if cart_item.quantity <= 1:
                     cart_item.delete()
                 else:
                     cart_item.quantity -= 1
-                    cart_item.save()
+                    cart_item.save(update_fields=["quantity"])
 
-        carts = Cart.objects.filter(
-            user=request.user,
-            status=Cart.Status.ACTIVE
-        ).prefetch_related("items")
-
-        return Response(CartSerializer(carts, many=True).data)
-
-    
-#delete cart
-class CartManageViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):
-    permission_classes = [IsAuthenticated]
-    serializer_class = CartSerializer
-    queryset = Cart.objects.all()
-
-    def get_queryset(self):
-        return Cart.objects.filter(user=self.request.user)
-
-#list cart
-class CartListViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
-    permission_classes = [IsAuthenticated]
-    serializer_class = CartListSerializer
-
-    def list(self, request, *args, **kwargs):
-        # cache_key = cart_list_cache_key(request.user.id)
-
-        # cached_data = cache.get(cache_key)
-        # if cached_data:
-        #     return Response(cached_data)
-
-        queryset = Cart.objects.filter(
-            user=request.user,
-            status=Cart.Status.ACTIVE 
-        ).prefetch_related(
-            "items__menu_item",
-            "restaurant"
-        )
-
-        data = self.get_serializer(queryset, many=True).data
-        # cache.set(cache_key, data, timeout=300)
-
-        return Response(data)
-
+        carts = self.get_queryset()
+        return Response(self.get_serializer(carts, many=True).data)
     
 #list all orders
 class OrderListView(generics.ListAPIView):
