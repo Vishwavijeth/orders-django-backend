@@ -1,0 +1,38 @@
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: docker/dockerfiles/Dockerfile-app
+    container_name: django_app
+    command: gunicorn orders_backend.wsgi:application --bind 0.0.0.0:8000
+    volumes:
+      - ..:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DB_HOST: postgres
+      DB_NAME: app_db
+      DB_USER: app_user
+      DB_PASSWORD: app_pass
+      REDIS_HOST: redis
+
+  celery_worker:
+    build:
+      context: ..
+      dockerfile: docker/dockerfiles/Dockerfile-app
+    container_name: celery_worker
+    command: celery -A orders_backend worker --loglevel=info -P solo
+    volumes:
+      - ..:/app
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DB_HOST: postgres
+      DB_NAME: app_db
+      DB_USER: app_user
+      DB_PASSWORD: app_pass
+      REDIS_HOST: redis

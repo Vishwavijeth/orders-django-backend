@@ -5,8 +5,14 @@ from rest_framework_simplejwt.views import(
     TokenObtainPairView,
 )
 from apps.users.views import RegisterView
+from django.http import HttpResponse
+
+
+def home(request):
+    return HttpResponse("Django app is running!")
 
 urlpatterns = [
+    path("", home),  # <- root route
     path("admin/", admin.site.urls),
 
     path('api/register/', RegisterView.as_view()),
