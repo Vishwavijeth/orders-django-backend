@@ -1,16 +1,14 @@
 from django.shortcuts import render
 from rest_framework import viewsets, permissions
-from rest_framework.permissions import IsAuthenticated
-from rest_framework import generics
 from rest_framework.viewsets import ModelViewSet
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.exceptions import PermissionDenied
 from apps.restaurants.models import Restaurant, Menu
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from .permissions import IsRestaurantAdmin, IsRestaurantOwnerOrReadOnly, IsMenuOwnerOrReadOnly
 from .serializers import RestaurantSerializer, MenuSerializer
 from .pagination import MenuPagination
-    
+
+
 class RestaurantViewSet(viewsets.ModelViewSet):
 
     # public can view, only owner can modify

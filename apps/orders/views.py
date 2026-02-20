@@ -14,7 +14,6 @@ from apps.orders.models import Order
 from apps.orders.serializers.order import OrderSerializer
 from .tasks import generate_order_report_task
 
-
 # Cart view set
 
 class CartViewSet(
