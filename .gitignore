@@ -28,3 +28,7 @@ db.sqlite3
 media/
 staticfiles/
 .DS_Store
+
+*.ctl
+*.pid
+*.log
