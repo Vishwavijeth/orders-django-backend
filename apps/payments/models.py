@@ -12,6 +12,7 @@ class Payment(models.Model):
     provider = models.CharField(max_length=50, default="razorpay")
     payment_id = models.CharField(max_length=100, null=True, blank=True)
     payment_link = models.URLField(null=True, blank=True)
+    coupon = models.ForeignKey("restaurants.Coupon", null=True, blank=True, on_delete=models.SET_NULL, related_name="payments")
     created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     def __str__(self):
