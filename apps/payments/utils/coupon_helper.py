@@ -1,12 +1,12 @@
 from decimal import Decimal
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
+from apps.restaurants.models.coupon import CouponUsage
 
-def validate_and_calculate_coupon(carts, coupon):
-
+def validate_and_calculate_coupon(carts, coupon, user):
     now = timezone.now()
 
-    # BASIC VALIDATIONS
+    # ---------- BASIC ----------
     if not coupon.is_active:
         raise ValidationError("Coupon is inactive")
 
@@ -16,45 +16,59 @@ def validate_and_calculate_coupon(carts, coupon):
     if coupon.valid_to and coupon.valid_to < now:
         raise ValidationError("Coupon expired")
 
-    if coupon.usage_limit and coupon.used_count >= coupon.usage_limit:
-        raise ValidationError("Coupon usage limit reached")
+    # ---------- PER USER LIMIT ----------
+    if coupon.usage_limit:
+        user_usage_count = (
+            CouponUsage.objects
+            .filter(user=user, coupon=coupon)
+            .count()
+        )
 
-    # RESTAURANT ANALYSIS
+        if user_usage_count >= coupon.usage_limit:
+            raise ValidationError(
+                "You have already used this coupon maximum allowed times"
+            )
+
+    # ---------- RESTAURANT ANALYSIS ----------
     restaurant_ids = set(carts.values_list("restaurant_id", flat=True))
     multi_restaurant = len(restaurant_ids) > 1
 
-    # RESTAURANT-SPECIFIC RULE
-    if coupon.restaurant_specific:
+    coupon_restaurant_ids = set(
+        coupon.restaurant_specific.values_list("id", flat=True)
+    )
+
+    if coupon_restaurant_ids:
+        # restaurant specific coupon
 
         if multi_restaurant:
             raise ValidationError(
                 "Restaurant specific coupon cannot be used for multiple restaurants"
             )
 
-        if coupon.restaurant_id not in restaurant_ids:
-            raise ValidationError(
-                "Coupon not valid for selected restaurant"
-            )
+        if not restaurant_ids.intersection(coupon_restaurant_ids):
+            raise ValidationError("Coupon not valid for selected restaurant")
 
-        eligible_carts = carts.filter(restaurant_id=coupon.restaurant_id)
-
+        eligible_carts = carts.filter(
+            restaurant_id__in=coupon_restaurant_ids
+        )
     else:
+        # global coupon
         eligible_carts = carts
 
-    # CALCULATE ELIGIBLE TOTAL
+    # ---------- ELIGIBLE TOTAL ----------
     eligible_total = Decimal("0.00")
 
     for cart in eligible_carts.prefetch_related("items"):
         for item in cart.items.all():
             eligible_total += item.price_snapshot * item.quantity
 
-    # MIN ORDER CHECK
-    if coupon.min_order_value and eligible_total < coupon.min_order_value:
+    # ---------- MIN ORDER ----------
+    if coupon.min_order_amount and eligible_total < coupon.min_order_amount:
         raise ValidationError(
-            f"Minimum order value should be {coupon.min_order_value}"
+            f"Minimum order value should be {coupon.min_order_amount}"
         )
 
-    # DISCOUNT CALCULATION
+    # ---------- DISCOUNT ----------
     if coupon.discount_type == coupon.DiscountType.FLAT:
         discount = min(coupon.discount_value, eligible_total)
 

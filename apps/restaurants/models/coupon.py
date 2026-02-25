@@ -1,5 +1,6 @@
 from django.db import models
 from .restaurant import Restaurant
+from apps.users.models import User
 
 class Coupon(models.Model):
     class DiscountType(models.TextChoices):
@@ -46,3 +47,12 @@ class Coupon(models.Model):
     
     def __str__(self):
         return self.code
+    
+class CouponUsage(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="coupon_usages")
+    coupon = models.ForeignKey(Coupon, on_delete=models.CASCADE, related_name="usage")
+    order = models.ForeignKey("orders.Order", on_delete=models.SET_NULL, null=True, blank=True)
+    used_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "coupon", "order")

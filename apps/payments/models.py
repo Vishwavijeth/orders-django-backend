@@ -6,6 +6,7 @@ class Payment(models.Model):
         SUCCESS = "SUCCESS", "Success"
         FAILED = "FAILED", "Failed"
 
+    user = models.ForeignKey("users.User", on_delete=models.CASCADE, related_name="payments", null=True, blank=True)
     carts = models.ManyToManyField("orders.Cart", related_name="payments")
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.INITIATED, db_index=True)
