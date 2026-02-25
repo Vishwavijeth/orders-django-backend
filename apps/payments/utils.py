@@ -13,7 +13,6 @@ def _line_total_expression():
         output_field=DecimalField(max_digits=12, decimal_places=2),
     )
 
-
 def get_carts_total(cart_qs):
     """
     Total for multiple carts (single SQL).
@@ -62,3 +61,4 @@ def get_payment_orders_total(payment_id):
             )
         )["total"]
     )
+

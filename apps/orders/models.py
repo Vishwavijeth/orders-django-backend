@@ -2,6 +2,7 @@ from django.db import models
 from apps.users.models import User
 from apps.restaurants.models import Restaurant, Menu
 from apps.payments.models import Payment
+from apps.restaurants.models import Coupon
 
 class Cart(models.Model):
     class Status(models.TextChoices):
@@ -41,8 +42,16 @@ class Order(models.Model):
     cart = models.OneToOneField(Cart, on_delete=models.SET_NULL, null=True, related_name="order")
     payment = models.OneToOneField(Payment, on_delete=models.SET_NULL, null=True, related_name="order")
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    discounted_applied = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    coupon = models.ForeignKey(Coupon, null=True, blank=True, on_delete=models.SET_NULL)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PLACED, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
+
+    def save(self, *args, **kwargs):
+        if self.coupon:
+            self.coupon.used_count += 1
+            self.coupon.save()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Order {self.id} ({self.user}) - {self.status}"
