@@ -3,7 +3,8 @@ from django.conf import settings
 from django.db import transaction
 from openpyxl import Workbook, load_workbook
 
-from .models import Order, ReportCheckpoint
+from .models.order import Order
+from .models.report import ReportCheckpoint
 
 
 REPORT_NAME = "orders_report"

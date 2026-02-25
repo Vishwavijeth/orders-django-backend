@@ -2,18 +2,20 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
 from django.conf import settings
-from django.utils import timezone
 from decimal import Decimal
 from django.db import transaction
 import razorpay
 
 from apps.payments.models import Payment
 
-from apps.orders.models import Cart, Order
-from apps.restaurants.models import Coupon
+from apps.orders.models.cart import Cart
+from apps.orders.models.order import Order
+from apps.restaurants.models.coupon import Coupon
 from .tasks import create_orders_from_payment
-from .utils import get_carts_total
+from .utils.cart_helper import get_carts_total
+from .utils.coupon_helper import validate_and_calculate_coupon
 
 import json
 import hmac
@@ -28,7 +30,6 @@ class CreatePaymentLinkView(APIView):
         cart_ids = request.data.get("cart_ids", [])
         coupon_id = request.data.get("coupon_id")
 
-        # ✅ Fetch carts
         carts = Cart.objects.filter(
             id__in=cart_ids,
             user=request.user,
@@ -38,57 +39,24 @@ class CreatePaymentLinkView(APIView):
         if not carts.exists():
             return Response({"detail": "No valid carts selected"}, status=400)
 
-        # ✅ original total
         total_amount = get_carts_total(carts)
 
-        # defaults
         final_payable_amount = total_amount
         discount_applied = Decimal("0.00")
         coupon = None
 
-        # ------------------------------------------------
-        # ✅ APPLY COUPON (ONLY HERE)
-        # ------------------------------------------------
         if coupon_id:
             try:
                 coupon = Coupon.objects.get(id=coupon_id, is_active=True)
             except Coupon.DoesNotExist:
                 return Response({"detail": "Invalid coupon"}, status=400)
 
-            now = timezone.now()
-
-            if coupon.valid_from and coupon.valid_from > now:
-                return Response({"detail": "Coupon not yet valid"}, status=400)
-
-            if coupon.valid_to and coupon.valid_to < now:
-                return Response({"detail": "Coupon expired"}, status=400)
-
-            # FLAT
-            if coupon.discount_type == Coupon.DiscountType.FLAT:
-                discount_applied = min(coupon.discount_value, total_amount)
+            try:
+                discount_applied = validate_and_calculate_coupon(carts, coupon)
                 final_payable_amount = total_amount - discount_applied
+            except ValidationError as e:
+                return Response({"detail": str(e)}, status=400)
 
-            # PERCENTAGE
-            elif coupon.discount_type == Coupon.DiscountType.PERCENTAGE:
-                total_discount = Decimal("0.00")
-
-                for cart in carts:
-                    for item in cart.items.all():
-                        item_total = item.price_snapshot * item.quantity
-                        item_discount = (
-                            item_total * coupon.discount_value / Decimal("100.00")
-                        ).quantize(Decimal("0.01"))
-                        total_discount += item_discount
-
-                discount_applied = min(
-                    total_discount,
-                    coupon.max_discount_amount or total_amount,
-                )
-                final_payable_amount = total_amount - discount_applied
-
-        # ------------------------------------------------
-        # ✅ CREATE RAZORPAY LINK (PAY WHAT USER SEES)
-        # ------------------------------------------------
         client = razorpay.Client(
             auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
         )
@@ -102,20 +70,14 @@ class CreatePaymentLinkView(APIView):
             }
         )
 
-        # ------------------------------------------------
-        # ✅ SAVE PAYMENT (WITH COUPON REFERENCE)
-        # ------------------------------------------------
         payment = Payment.objects.create(
             amount=final_payable_amount,
-            coupon=coupon if coupon else None,
+            coupon=coupon,
             payment_id=link["id"],
             payment_link=link["short_url"],
         )
         payment.carts.set(carts)
 
-        # ------------------------------------------------
-        # ✅ RESPONSE (debug friendly)
-        # ------------------------------------------------
         return Response(
             {
                 "payment_id": payment.id,
@@ -172,12 +134,10 @@ def razorpay_webhook(request):
     with transaction.atomic():
         payment = Payment.objects.select_for_update().get(payment_id=link_id)
 
-        # ✅ idempotent protection
         if payment.status != Payment.Status.SUCCESS:
             payment.status = Payment.Status.SUCCESS
             payment.save(update_fields=["status"])
 
-            # trigger ONLY once
             create_orders_from_payment.delay(payment.id)
 
     return HttpResponse(status=200)

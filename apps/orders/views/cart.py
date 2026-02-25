@@ -1,20 +1,13 @@
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework import viewsets, mixins, generics
-from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework import viewsets, mixins
 from django.db import transaction
 from django.db.models.functions import Coalesce
 from django.db.models import Sum, F, DecimalField, ExpressionWrapper, Value
 from django.conf import settings
-from apps.orders.models import Cart, CartItem
-from apps.restaurants.models import Menu
+from apps.orders.models.cart import Cart, CartItem
+from apps.restaurants.models.restaurant import Menu
 from apps.orders.serializers.carts import CartSerializer
-
-from apps.orders.models import Order
-from apps.orders.serializers.order import OrderSerializer
-from .tasks import generate_order_report_task
-
-# Cart view set
 
 class CartViewSet(
     mixins.CreateModelMixin,
@@ -105,33 +98,3 @@ class CartViewSet(
 
         carts = self.get_queryset()
         return Response(self.get_serializer(carts, many=True).data)
-    
-#list all orders
-class OrderListView(generics.ListAPIView):
-    serializer_class = OrderSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        return (
-            Order.objects
-            .filter(user=self.request.user)
-            .select_related("restaurant", "payment")   # FK → select_related
-            .prefetch_related("items__menu_item")      # Reverse FK → prefetch
-            .order_by("-created_at")
-        )
-    
-class GenerateOrderReportAPIView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        task = generate_order_report_task.delay()
-
-        file_url = request.build_absolute_uri(
-            settings.MEDIA_URL + "order_details_report.xlsx"
-        )
-
-        return Response({
-            "message": "report generation started",
-            "task id": task.id,
-            "file_url": file_url
-        })

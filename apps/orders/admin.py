@@ -4,7 +4,8 @@ from django.contrib import admin
 
 # apps/orders/admin.py
 from django.contrib import admin
-from .models import Cart, CartItem, Order, OrderItem
+from .models.cart import Cart, CartItem
+from .models.order import Order, OrderItem
 
 # Inline for Cart Items inside Cart
 class CartItemInline(admin.TabularInline):

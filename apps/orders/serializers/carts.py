@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from apps.orders.models import Cart, CartItem
+from apps.orders.models.cart import Cart, CartItem
 
 class CartItemSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="menu_item.name", read_only=True)

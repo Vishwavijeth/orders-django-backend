@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from ..models import Coupon
+from ..models.coupon import Coupon
 
 class CouponListSerializer(serializers.ModelSerializer):
     class Meta:
