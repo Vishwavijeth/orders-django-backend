@@ -1,7 +1,8 @@
 from django.db.models import Sum, F, DecimalField, ExpressionWrapper
 from django.db.models.functions import Coalesce
 
-from apps.orders.models import CartItem, Order
+from apps.orders.models.cart import CartItem
+from apps.orders.models.order import Order
 
 def _line_total_expression():
     """

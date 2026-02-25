@@ -1,6 +1,8 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from apps.orders.views import CartViewSet, OrderListView, GenerateOrderReportAPIView
+from .views.cart import CartViewSet
+from .views.order import OrderListView
+from .views.report import GenerateOrderReportAPIView
 
 router = DefaultRouter()
 router.register('cart', CartViewSet, basename='cart')

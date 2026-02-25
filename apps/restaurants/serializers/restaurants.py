@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from ..models import Restaurant, Menu
+from ..models.restaurant import Restaurant, Menu
 
 class RestaurantSerializer(serializers.ModelSerializer):
     owner = serializers.CharField(source="owner.username", read_only=True)

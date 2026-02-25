@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import RestaurantViewSet, MenuViewSet, CouponViewSet
+from .views.restaurant import RestaurantViewSet, MenuViewSet
+from .views.coupon import CouponViewSet
 
 router = DefaultRouter()
 router.register('restaurants', RestaurantViewSet, basename='restaurant')

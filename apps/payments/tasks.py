@@ -1,13 +1,12 @@
 from celery import shared_task
 from django.db import transaction
-from django.core.cache import cache
-from django.utils import timezone
 from decimal import Decimal
-from apps.restaurants.models import Coupon
-from apps.orders.models import Order, OrderItem, Cart
+from django.db.models import F
+from apps.orders.models.order import Order, OrderItem
+from apps.orders.models.cart import Cart
 from apps.payments.models import Payment
 from apps.users.utils import send_email
-from .utils import annotate_cart_totals, get_payment_orders_total
+from .utils.coupon_helper import validate_and_calculate_coupon
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 5})
 def create_orders_from_payment(self, payment_id):
@@ -31,42 +30,20 @@ def create_orders_from_payment(self, payment_id):
             discounted_total = total
             applied_coupon = None
 
-            # ------------------------------------------------
-            # ✅ APPLY COUPON
-            # ------------------------------------------------
             if coupon:
-                now = timezone.now()
-
-                if not (
-                    (coupon.valid_from and coupon.valid_from > now)
-                    or (coupon.valid_to and coupon.valid_to < now)
-                ):
+                try:
+                    discount_applied = validate_and_calculate_coupon(
+                        payment.carts.filter(id=cart.id),
+                        coupon,
+                    )
+                    discounted_total = total - discount_applied
                     applied_coupon = coupon
+                except Exception:
+                    # safety fallback
+                    discount_applied = Decimal("0.00")
+                    discounted_total = total
+                    applied_coupon = None
 
-                    if coupon.discount_type == coupon.DiscountType.FLAT:
-                        discount_applied = min(coupon.discount_value, total)
-                        discounted_total = total - discount_applied
-
-                    elif coupon.discount_type == coupon.DiscountType.PERCENTAGE:
-                        total_discount = Decimal("0.00")
-
-                        for item in cart.items.all():
-                            item_total = item.price_snapshot * item.quantity
-                            item_discount = (
-                                item_total * coupon.discount_value
-                                / Decimal("100.00")
-                            ).quantize(Decimal("0.01"))
-                            total_discount += item_discount
-
-                        discount_applied = min(
-                            total_discount,
-                            coupon.max_discount_amount or total,
-                        )
-                        discounted_total = total - discount_applied
-
-            # ------------------------------------------------
-            # ✅ CREATE ORDER (NEVER NULL)
-            # ------------------------------------------------
             order = Order.objects.create(
                 user=cart.user,
                 restaurant=cart.restaurant,
@@ -93,13 +70,23 @@ def create_orders_from_payment(self, payment_id):
             cart.status = Cart.Status.CHECKED_OUT
             cart.save(update_fields=["status"])
 
-        # ✅ increment usage once
         if coupon:
-            coupon.used_count += 1
-            coupon.save(update_fields=["used_count"])
+            coupon.refresh_from_db()
+
+            if not coupon.usage_limit:
+                coupon.used_count = F("used_count") + 1
+                coupon.save(update_fields=["used_count"])
+            else:
+                coupon.used_count = F("used_count") + 1
+                coupon.save(update_fields=["used_count"])
+
+                coupon.refresh_from_db()
+
+                if coupon.used_count >= coupon.usage_limit and coupon.is_active:
+                    coupon.is_active = False
+                    coupon.save(update_fields=["is_active"])
 
     send_order_confirmation_email.delay(payment_id)
-
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 5})
