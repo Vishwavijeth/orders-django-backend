@@ -45,6 +45,7 @@ class CreatePaymentLinkView(APIView):
         discount_applied = Decimal("0.00")
         coupon = None
 
+        # ✅ COUPON APPLY
         if coupon_id:
             try:
                 coupon = Coupon.objects.get(id=coupon_id, is_active=True)
@@ -52,7 +53,11 @@ class CreatePaymentLinkView(APIView):
                 return Response({"detail": "Invalid coupon"}, status=400)
 
             try:
-                discount_applied = validate_and_calculate_coupon(carts, coupon)
+                discount_applied = validate_and_calculate_coupon(
+                    carts,
+                    coupon,
+                    request.user,
+                )
                 final_payable_amount = total_amount - discount_applied
             except ValidationError as e:
                 return Response({"detail": str(e)}, status=400)
@@ -71,11 +76,13 @@ class CreatePaymentLinkView(APIView):
         )
 
         payment = Payment.objects.create(
+            user=request.user,
             amount=final_payable_amount,
             coupon=coupon,
             payment_id=link["id"],
             payment_link=link["short_url"],
         )
+
         payment.carts.set(carts)
 
         return Response(

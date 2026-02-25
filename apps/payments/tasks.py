@@ -5,13 +5,20 @@ from django.db.models import F
 from apps.orders.models.order import Order, OrderItem
 from apps.orders.models.cart import Cart
 from apps.payments.models import Payment
+from apps.restaurants.models.coupon import CouponUsage, Coupon
 from apps.users.utils import send_email
 from .utils.coupon_helper import validate_and_calculate_coupon
 
-@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 5})
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=5,
+    retry_kwargs={"max_retries": 5},
+)
 def create_orders_from_payment(self, payment_id):
-    payment = Payment.objects.get(id=payment_id)
+    payment = Payment.objects.select_related("coupon", "user").get(id=payment_id)
     coupon = payment.coupon
+    user = payment.user
 
     with transaction.atomic():
         carts_qs = (
@@ -19,6 +26,8 @@ def create_orders_from_payment(self, payment_id):
             .filter(status=Cart.Status.ACTIVE)
             .prefetch_related("items", "items__menu_item", "restaurant")
         )
+
+        orders_created = []
 
         for cart in carts_qs:
             total = sum(
@@ -30,16 +39,17 @@ def create_orders_from_payment(self, payment_id):
             discounted_total = total
             applied_coupon = None
 
+            # 🔥 REVALIDATE COUPON
             if coupon:
                 try:
                     discount_applied = validate_and_calculate_coupon(
                         payment.carts.filter(id=cart.id),
                         coupon,
+                        user,
                     )
                     discounted_total = total - discount_applied
                     applied_coupon = coupon
                 except Exception:
-                    # safety fallback
                     discount_applied = Decimal("0.00")
                     discounted_total = total
                     applied_coupon = None
@@ -53,6 +63,8 @@ def create_orders_from_payment(self, payment_id):
                 discounted_applied=discount_applied,
                 coupon=applied_coupon,
             )
+
+            orders_created.append(order)
 
             OrderItem.objects.bulk_create(
                 [
@@ -70,21 +82,13 @@ def create_orders_from_payment(self, payment_id):
             cart.status = Cart.Status.CHECKED_OUT
             cart.save(update_fields=["status"])
 
-        if coupon:
-            coupon.refresh_from_db()
-
-            if not coupon.usage_limit:
-                coupon.used_count = F("used_count") + 1
-                coupon.save(update_fields=["used_count"])
-            else:
-                coupon.used_count = F("used_count") + 1
-                coupon.save(update_fields=["used_count"])
-
-                coupon.refresh_from_db()
-
-                if coupon.used_count >= coupon.usage_limit and coupon.is_active:
-                    coupon.is_active = False
-                    coupon.save(update_fields=["is_active"])
+        # 🔥 PER USER USAGE TRACKING (FIXED)
+        if coupon and orders_created:
+            CouponUsage.objects.get_or_create(
+                user=user,
+                coupon=coupon,
+                order=orders_created[0],
+            )
 
     send_order_confirmation_email.delay(payment_id)
 
