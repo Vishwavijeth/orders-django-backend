@@ -98,7 +98,7 @@ def send_order_confirmation_email(self, payment_id):
     orders = (
         Order.objects
         .filter(payment_id=payment_id)
-        .select_related("user", "payment")
+        .select_related("user", "payment", "coupon")
         .prefetch_related("items__menu_item")
     )
 
@@ -110,25 +110,67 @@ def send_order_confirmation_email(self, payment_id):
     payment_obj = first_order.payment
 
     items = []
-    total_amount = 0
+    original_total = 0
+    total_discount = 0
+    final_total = 0
+    coupon_used = None
 
     for order in orders:
-        total_amount += order.total_amount
+        # Reconstruct original total from items
+        order_original_total = sum(
+            item.price_snapshot * item.quantity
+            for item in order.items.all()
+        )
+
+        original_total += order_original_total
+        total_discount += order.discounted_applied or 0
+        final_total += order.total_amount
+
+        if order.coupon and not coupon_used:
+            coupon_used = order.coupon
+
         for item in order.items.all():
             items.append(
-                f"- {item.menu_item.name} x {item.quantity} (₹{item.price_snapshot})"
+                f"- {item.menu_name_snapshot} x {item.quantity} (₹{item.price_snapshot})"
             )
 
-    message = f"""
+    # -------- Email Content -------- #
+
+    if coupon_used:
+        message = f"""
 Hi {user.username},
 
 🎉 Your order has been placed successfully!
 
 Payment ID: {payment_obj.payment_id}
-Total Amount: ₹{total_amount}
 
 Items Ordered:
 {chr(10).join(items)}
+
+-----------------------------------
+Original Amount : ₹{original_total}
+Coupon Applied  : {coupon_used.code}
+Discount        : -₹{total_discount}
+-----------------------------------
+Final Paid      : ₹{final_total}
+-----------------------------------
+
+Thank you for ordering with us!
+"""
+    else:
+        message = f"""
+Hi {user.username},
+
+🎉 Your order has been placed successfully!
+
+Payment ID: {payment_obj.payment_id}
+
+Items Ordered:
+{chr(10).join(items)}
+
+-----------------------------------
+Total Amount : ₹{original_total}
+-----------------------------------
 
 Thank you for ordering with us!
 """
