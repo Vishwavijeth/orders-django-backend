@@ -6,7 +6,6 @@ from apps.restaurants.models.coupon import CouponUsage
 def validate_and_calculate_coupon(carts, coupon, user):
     now = timezone.now()
 
-    # ---------- BASIC ----------
     if not coupon.is_active:
         raise ValidationError("Coupon is inactive")
 
@@ -16,7 +15,6 @@ def validate_and_calculate_coupon(carts, coupon, user):
     if coupon.valid_to and coupon.valid_to < now:
         raise ValidationError("Coupon expired")
 
-    # ---------- PER USER LIMIT ----------
     if coupon.usage_limit:
         user_usage_count = (
             CouponUsage.objects
@@ -29,7 +27,6 @@ def validate_and_calculate_coupon(carts, coupon, user):
                 "You have already used this coupon maximum allowed times"
             )
 
-    # ---------- RESTAURANT ANALYSIS ----------
     restaurant_ids = set(carts.values_list("restaurant_id", flat=True))
     multi_restaurant = len(restaurant_ids) > 1
 
@@ -38,7 +35,6 @@ def validate_and_calculate_coupon(carts, coupon, user):
     )
 
     if coupon_restaurant_ids:
-        # restaurant specific coupon
 
         if multi_restaurant:
             raise ValidationError(
@@ -52,23 +48,19 @@ def validate_and_calculate_coupon(carts, coupon, user):
             restaurant_id__in=coupon_restaurant_ids
         )
     else:
-        # global coupon
         eligible_carts = carts
 
-    # ---------- ELIGIBLE TOTAL ----------
     eligible_total = Decimal("0.00")
 
     for cart in eligible_carts.prefetch_related("items"):
         for item in cart.items.all():
             eligible_total += item.price_snapshot * item.quantity
 
-    # ---------- MIN ORDER ----------
     if coupon.min_order_amount and eligible_total < coupon.min_order_amount:
         raise ValidationError(
             f"Minimum order value should be {coupon.min_order_amount}"
         )
 
-    # ---------- DISCOUNT ----------
     if coupon.discount_type == coupon.DiscountType.FLAT:
         discount = min(coupon.discount_value, eligible_total)
 
