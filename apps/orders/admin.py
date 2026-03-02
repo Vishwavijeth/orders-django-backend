@@ -1,8 +1,4 @@
 from django.contrib import admin
-
-# Register your models here.
-
-# apps/orders/admin.py
 from django.contrib import admin
 from .models.cart import Cart, CartItem
 from .models.order import Order, OrderItem
@@ -39,4 +35,3 @@ class OrderAdmin(admin.ModelAdmin):
     search_fields = ('user__username', 'restaurant__name')
     inlines = [OrderItemInline]
     readonly_fields = ('created_at', 'total_amount')
-
