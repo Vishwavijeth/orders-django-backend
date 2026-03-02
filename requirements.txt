@@ -5,6 +5,7 @@ django-redis
 djangorestframework-simplejwt
 django-phonenumber-field
 dotenv
+environ
 celery
 redis
 flower
