@@ -74,6 +74,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
+    "oauth2_provider",
 ]
 
 CUSTOM_APPS = [
@@ -152,6 +153,11 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 DEFAULT_FROM_EMAIL = os.getenv("EMAIL_HOST_USER")
 
+# oauth2
+OAUTH2_CLIENT_ID = os.getenv("OAUTH2_CLIENT_ID")
+OAUTH2_CLIENT_SECRET = os.getenv("OAUTH2_CLIENT_SECRET")
+ACCESS_TOKEN_EXPIRE_SECONDS = os.getenv("ACCESS_TOKEN_EXPIRE_SECONDS")
+
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -173,8 +179,11 @@ WSGI_APPLICATION = "orders_backend.wsgi.application"
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
 REST_FRAMEWORK = {
+    # "DEFAULT_AUTHENTICATION_CLASSES": (
+    #     "rest_framework_simplejwt.authentication.JWTAuthentication",
+    # ),
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",

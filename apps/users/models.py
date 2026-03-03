@@ -13,6 +13,7 @@ class User(AbstractUser):
         default=Role.CUSTOMER,
         db_index=True
     )
+    email = models.EmailField(unique=True)
     phone_number = models.CharField(max_length=15, blank=True)
     is_email_verified = models.BooleanField(default=False)
 
