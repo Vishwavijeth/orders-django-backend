@@ -6,7 +6,9 @@ from rest_framework.exceptions import PermissionDenied
 from apps.restaurants.models.restaurant import Restaurant, Menu
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from ..permissions import IsRestaurantAdmin, IsRestaurantOwnerOrReadOnly, IsMenuOwnerOrReadOnly
-from ..serializers.restaurants import RestaurantSerializer, MenuSerializer
+from ..serializers.restaurants import RestaurantSerializer, MenuSerializer, MenuListModelSerializer
+from apps.common.views.generic import AppModelListAPIViewSet
+from apps.restaurants.filters import MenuListFilter
 from ..pagination import MenuPagination
 
 class RestaurantViewSet(viewsets.ModelViewSet):
@@ -70,3 +72,17 @@ class MenuViewSet(ModelViewSet):
             raise PermissionDenied("You do not own this restaurant.")
 
         serializer.save(restaurant=restaurant)
+
+class MenuListAPIViewSet(AppModelListAPIViewSet):
+    queryset = Menu.objects.all()
+    serializer_class = MenuListModelSerializer
+    search_fields = [
+        "name",
+        "restaurant__name",
+    ]
+    filterset_class = MenuListFilter
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        return queryset
+    

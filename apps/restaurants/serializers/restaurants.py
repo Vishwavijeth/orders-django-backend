@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from apps.common.serializers import AppReadOnlyModelSerializer
 from ..models.restaurant import Restaurant, Menu
 
 class RestaurantSerializer(serializers.ModelSerializer):
@@ -25,3 +26,37 @@ class MenuSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "created_at"]
+
+
+class MenuListModelSerializer(AppReadOnlyModelSerializer):
+    restaurant_name = serializers.CharField(
+        source="restaurant.name",
+        read_only=True,
+    )
+
+    class Meta(AppReadOnlyModelSerializer.Meta):
+        model = Menu
+        fields = [
+            "id",
+            "restaurant_name",
+            "name",
+            "price",
+            "is_available",
+        ]
+    
+    def get_filter_meta(self):
+        
+        restaurants = Restaurant.objects.all()
+
+        return {
+            "is_available": self.serialize_dj_choices(
+                [
+                    (True, "Available"),
+                    (False, "Not Available"),
+                ]
+            ),
+            "restaurant": [
+                {"id": r.id, "identity": r.name}
+                for r in restaurants
+            ],
+        }
