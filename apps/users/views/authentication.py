@@ -8,10 +8,11 @@ from ..helpers import OAuth2TokenHelper
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_decode
 from rest_framework.response import Response
-
+from apps.common.views.base import AppAPIView, NonAuthenticatedAPIMixin
+from apps.common.serializers import AppSerializer
 
 from django.contrib.auth import get_user_model
-    
+
 User = get_user_model()
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -46,9 +47,7 @@ def verify_email(request, uidb64, token):
 
     return HttpResponse("Invalid or expired link", status=400)
 
-class LoginAPIView(APIView):
-    permission_classes = []
-
+class LoginAPIView(NonAuthenticatedAPIMixin, AppAPIView):
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -57,12 +56,9 @@ class LoginAPIView(APIView):
 
         response_serializer = LoginResponseSerializer(user)
 
-        return Response(
-            response_serializer.data,
-            status=status.HTTP_200_OK
-        )
+        return self.send_response(data=response_serializer.data)
     
-class RefreshTokenAPIView(APIView):
+class RefreshTokenAPIView(NonAuthenticatedAPIMixin, AppAPIView):
     permission_classes = []
     
     class _Serializer(serializers.Serializer):
@@ -85,4 +81,23 @@ class RefreshTokenAPIView(APIView):
                 {"detail" : "invalid or expired refresh token"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        return Response(token_response, status=status.HTTP_200_OK)
+        return self.send_response(data=token_response)
+ 
+class LogoutAPIView(AppAPIView):
+    
+    class _Serializer(AppSerializer):
+        refresh_token = serializers.CharField()
+
+        def validate_refresh_token(self, refresh_token):
+            refresh_token = OAuth2TokenHelper().get_refresh_token(refresh_token)
+            if not refresh_token:
+                raise serializers.ValidationError("invalid refresh token")
+            return refresh_token
+    
+    serializer_class = _Serializer
+
+    def post(self, request, *args, **kwargs):
+        refresh_token = self.get_valid_serializer().validated_data["refresh_token"]
+        refresh_token.revoke()
+
+        return self.send_response("Logged out successfully")

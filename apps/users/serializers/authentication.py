@@ -43,28 +43,21 @@ class LoginSerializer(serializers.Serializer):
         email = attrs.get("email").lower()
         password = attrs.get("password")
 
-        try:
-            user = User.objects.filter(email=email).first()
-        except Exception as e:
-            raise serializers.ValidationError({"email" : "email not found", "detail" : e})
+        user = User.objects.filter(email=email).first()
+
+        if not user:
+            raise serializers.ValidationError({"email": "Email not found"})
 
         if not user.check_password(password):
-            raise serializers.ValidationError({"password" : "invalid password"})
-        
-        if not user.is_active:
-            raise serializers.ValidationError({"email" : "account is inactive"})
-        
-        if not user.is_email_verified:
-            raise serializers.ValidationError({"email" : "email not verified"})
-        
-        if not user.is_email_verified:
-            raise serializers.ValidationError({"email": "Email not verified."})
+            raise serializers.ValidationError({"password": "Invalid password"})
 
         if not user.is_active:
-            raise serializers.ValidationError({"email": "Account inactive."})
-        
+            raise serializers.ValidationError({"email": "Account inactive"})
+
+        if not user.is_email_verified:
+            raise serializers.ValidationError({"email": "Email not verified"})
+
         attrs["user"] = user
-
         return attrs
     
 class LoginResponseSerializer(serializers.ModelSerializer):
